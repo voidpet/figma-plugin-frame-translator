@@ -466,16 +466,19 @@ async function exportTranslatedFrame({
       }
     }
 
-    const fitResult = fitTextNodeToOriginalBounds(textNode, originalLayout);
-    if (fitResult.reduced) {
-      warnings.add(
-        `Reduced font size to fit bounds for "${textNode.name}" (${targetLanguage}).`,
-      );
-    }
-    if (fitResult.stillOverflowing) {
-      warnings.add(
-        `Text still overflows bounds for "${textNode.name}" (${targetLanguage}). Consider shorter copy or larger text area.`,
-      );
+    // Shrink only fixed-size text boxes. Auto-resize text should keep size.
+    if (originalLayout.textAutoResize === "NONE") {
+      const fitResult = fitTextNodeToOriginalBounds(textNode, originalLayout);
+      if (fitResult.reduced) {
+        warnings.add(
+          `Reduced font size to fit bounds for "${textNode.name}" (${targetLanguage}).`,
+        );
+      }
+      if (fitResult.stillOverflowing) {
+        warnings.add(
+          `Text still overflows bounds for "${textNode.name}" (${targetLanguage}). Consider shorter copy or larger text area.`,
+        );
+      }
     }
 
     if (languageFallbackFont && translatedText && translatedText.trim()) {
