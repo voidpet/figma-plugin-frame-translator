@@ -190,6 +190,122 @@ function scaleFontSizes(node, factor, minFontSize) {
   return changed;
 }
 
+function lineHeightsEqual(a, b) {
+  if (a === b) {
+    return true;
+  }
+  if (a === figma.mixed || b === figma.mixed) {
+    return false;
+  }
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") {
+    return false;
+  }
+  return a.unit === b.unit && a.value === b.value;
+}
+
+function getLineHeightRuns(node) {
+  const runs = [];
+  const length = node.characters.length;
+  if (!length) {
+    return runs;
+  }
+
+  let runStart = 0;
+  let runHeight = node.getRangeLineHeight(0, 1);
+  for (let i = 1; i < length; i += 1) {
+    const value = node.getRangeLineHeight(i, i + 1);
+    if (!lineHeightsEqual(value, runHeight)) {
+      runs.push({ start: runStart, end: i, lineHeight: runHeight });
+      runStart = i;
+      runHeight = value;
+    }
+  }
+  runs.push({ start: runStart, end: length, lineHeight: runHeight });
+  return runs;
+}
+
+function scalePixelLineHeights(node, factor) {
+  const runs = getLineHeightRuns(node);
+  if (!runs.length) {
+    return false;
+  }
+
+  let changed = false;
+  for (const run of runs) {
+    const lineHeight = run.lineHeight;
+    if (
+      !lineHeight ||
+      lineHeight === figma.mixed ||
+      typeof lineHeight !== "object"
+    ) {
+      continue;
+    }
+    if (lineHeight.unit !== "PIXELS") {
+      continue;
+    }
+
+    const currentValue = Number(lineHeight.value);
+    if (!Number.isFinite(currentValue)) {
+      continue;
+    }
+
+    const nextValue = Math.max(
+      8,
+      Math.round(currentValue * factor * 100) / 100,
+    );
+    if (nextValue < currentValue) {
+      node.setRangeLineHeight(run.start, run.end, {
+        unit: "PIXELS",
+        value: nextValue,
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function normalizeMultilineLineHeight(node) {
+  if (node.characters.indexOf("\n") < 0) {
+    return false;
+  }
+
+  const runs = getLineHeightRuns(node);
+  let changed = false;
+  for (const run of runs) {
+    const lineHeight = run.lineHeight;
+    if (
+      !lineHeight ||
+      lineHeight === figma.mixed ||
+      typeof lineHeight !== "object"
+    ) {
+      continue;
+    }
+    if (lineHeight.unit !== "PIXELS") {
+      continue;
+    }
+
+    const fontSize = Number(node.getRangeFontSize(run.start, run.start + 1));
+    const currentValue = Number(lineHeight.value);
+    if (
+      !Number.isFinite(fontSize) ||
+      !Number.isFinite(currentValue) ||
+      fontSize <= 0
+    ) {
+      continue;
+    }
+
+    const maxDesired = Math.round(fontSize * 1.28 * 100) / 100;
+    if (currentValue > maxDesired) {
+      node.setRangeLineHeight(run.start, run.end, {
+        unit: "PIXELS",
+        value: maxDesired,
+      });
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function fitTextNodeToOriginalBounds(node, layout) {
   const minFontSize = 8;
   const maxIterations = 12;
@@ -223,14 +339,30 @@ function fitTextNodeToOriginalBounds(node, layout) {
       break;
     }
 
-    const changed = scaleFontSizes(node, factor, minFontSize);
-    if (!changed) {
+    const sizeChanged = scaleFontSizes(node, factor, minFontSize);
+    const lineHeightChanged = scalePixelLineHeights(node, factor);
+    if (!sizeChanged && !lineHeightChanged) {
       break;
     }
     iteration += 1;
   }
 
   return { reduced: iteration > 0, stillOverflowing: lastOverflow };
+}
+
+function shouldFitAutoResizeNode(node, layout) {
+  const autoSize = layout.textAutoResize;
+  if (
+    autoSize !== "WIDTH_AND_HEIGHT" &&
+    autoSize !== "WIDTH" &&
+    autoSize !== "HEIGHT"
+  ) {
+    return false;
+  }
+
+  const tooWide = node.width > layout.width * 1.12;
+  const tooTall = node.height > layout.height * 1.25;
+  return tooWide || tooTall;
 }
 
 function restoreCenteredPositionIfNeeded(node, layout) {
@@ -356,7 +488,9 @@ async function translateTextsWithOpenAI({ apiKey, targetLanguage, texts }) {
             "- Keep capitalization and punctuation intent appropriate for the target language.",
             "- Do not force all-caps or title case unless the source already uses it.",
             "- Keep the same number of lines as the source string when possible.",
-            "- For short labels/buttons, keep translation compact (avoid unnecessary long phrasing).",
+            "- For short labels/buttons, keep translation very compact and punchy (avoid long phrasing).",
+            "- Target translated length around source length; avoid expanding beyond ~120% unless necessary.",
+            "- For display headings, prefer short imperative phrasing (1-4 words total).",
             "- Preserve all numeric and gameplay tokens exactly (for example: 4v4, 3D, 100%, x2).",
             "- Keep brand/product names unchanged.",
             "- If source is already in target language, keep it as-is unless awkward.",
@@ -452,13 +586,15 @@ async function exportTranslatedFrame({
     const sourceText = texts[i];
     const numericEnforced = enforceNumericTokens(sourceText, translatedText);
 
-    if (!numericEnforced.text || !numericEnforced.text.trim()) {
+    let finalText = numericEnforced.text;
+    if (!finalText || !finalText.trim()) {
       warnings.add(
         `Empty translation returned for "${textNode.name}" (${targetLanguage}). Kept original text.`,
       );
-      textNode.characters = sourceText;
+      finalText = sourceText;
+      textNode.characters = finalText;
     } else {
-      textNode.characters = numericEnforced.text;
+      textNode.characters = finalText;
       if (numericEnforced.addedTokens.length) {
         warnings.add(
           `Preserved numeric token(s) ${numericEnforced.addedTokens.join(", ")} for "${textNode.name}" (${targetLanguage}).`,
@@ -466,8 +602,29 @@ async function exportTranslatedFrame({
       }
     }
 
-    // Shrink only fixed-size text boxes. Auto-resize text should keep size.
-    if (originalLayout.textAutoResize === "NONE") {
+    if (languageFallbackFont && finalText && finalText.trim()) {
+      try {
+        await ensureFontLoaded(languageFallbackFont, loadedFonts);
+        textNode.fontName = languageFallbackFont;
+      } catch (error) {
+        warnings.add(
+          `Could not apply fallback font "${languageFallbackFont.family} ${languageFallbackFont.style}" on "${textNode.name}" (${targetLanguage}).`,
+        );
+      }
+    }
+
+    const lineHeightNormalized = normalizeMultilineLineHeight(textNode);
+    if (lineHeightNormalized) {
+      warnings.add(
+        `Adjusted line spacing for "${textNode.name}" (${targetLanguage}) to avoid large gaps.`,
+      );
+    }
+
+    // Fit after final font is applied; fallback font can change metrics.
+    if (
+      originalLayout.textAutoResize === "NONE" ||
+      shouldFitAutoResizeNode(textNode, originalLayout)
+    ) {
       const fitResult = fitTextNodeToOriginalBounds(textNode, originalLayout);
       if (fitResult.reduced) {
         warnings.add(
@@ -477,17 +634,6 @@ async function exportTranslatedFrame({
       if (fitResult.stillOverflowing) {
         warnings.add(
           `Text still overflows bounds for "${textNode.name}" (${targetLanguage}). Consider shorter copy or larger text area.`,
-        );
-      }
-    }
-
-    if (languageFallbackFont && translatedText && translatedText.trim()) {
-      try {
-        await ensureFontLoaded(languageFallbackFont, loadedFonts);
-        textNode.fontName = languageFallbackFont;
-      } catch (error) {
-        warnings.add(
-          `Could not apply fallback font "${languageFallbackFont.family} ${languageFallbackFont.style}" on "${textNode.name}" (${targetLanguage}).`,
         );
       }
     }
