@@ -128,6 +128,8 @@ function captureTextNodeLayout(node) {
     y: node.y,
     width: node.width,
     height: node.height,
+    right: node.x + node.width,
+    bottom: node.y + node.height,
     centerX: node.x + node.width / 2,
     centerY: node.y + node.height / 2,
     textAlignHorizontal: node.textAlignHorizontal,
@@ -351,33 +353,28 @@ function fitTextNodeToOriginalBounds(node, layout) {
 }
 
 function shouldFitAutoResizeNode(node, layout) {
-  const autoSize = layout.textAutoResize;
-  if (
-    autoSize !== "WIDTH_AND_HEIGHT" &&
-    autoSize !== "WIDTH" &&
-    autoSize !== "HEIGHT"
-  ) {
+  if (layout.textAutoResize === "NONE") {
     return false;
   }
 
-  const tooWide = node.width > layout.width * 1.12;
-  const tooTall = node.height > layout.height * 1.25;
-  return tooWide || tooTall;
+  const leftOverflow = node.x < layout.x - 1;
+  const rightOverflow = node.x + node.width > layout.right + 1;
+  const widthOverflow = node.width > layout.width * 1.01;
+  const heightOverflow = node.height > layout.height * 1.18;
+
+  return leftOverflow || rightOverflow || widthOverflow || heightOverflow;
 }
 
 function restoreCenteredPositionIfNeeded(node, layout) {
-  const autoSize = layout.textAutoResize;
-  const canShiftByContent =
-    autoSize === "WIDTH_AND_HEIGHT" ||
-    autoSize === "HEIGHT" ||
-    autoSize === "WIDTH";
-
-  if (!canShiftByContent) {
+  // Repositioning auto-resize text can cause drift on angled banners and RTL.
+  // Keep auto-resize nodes at Figma's natural position after text changes.
+  if (layout.textAutoResize !== "NONE") {
     return;
   }
 
-  node.x = layout.centerX - node.width / 2;
-  node.y = layout.centerY - node.height / 2;
+  // For fixed-size boxes, pin back to original top-left.
+  node.x = layout.x;
+  node.y = layout.y;
 }
 
 function extractNumericTokens(text) {
@@ -621,6 +618,7 @@ async function exportTranslatedFrame({
     }
 
     // Fit after final font is applied; fallback font can change metrics.
+    // For auto-resize text, only fit if it actually overflows the original area.
     if (
       originalLayout.textAutoResize === "NONE" ||
       shouldFitAutoResizeNode(textNode, originalLayout)
