@@ -1,40 +1,52 @@
-# Multilingual Frame Exporter (Figma Plugin)
+# Translate Frame Exporter (Figma Plugin)
 
-This plugin translates text layers inside selected Figma frames into one or more target languages using your OpenAI API key, then exports PNG files into a single ZIP download.
+This plugin translates text layers inside selected Figma frames into one or more target languages using your OpenAI API key, then exports PNG files in a single ZIP download.
 
-## What it does
+## Requirements
 
-- Uses selected `FRAME` nodes on the current page.
-- Clones each frame (original frame is not modified).
-- Translates all text nodes in each clone for each selected language.
-- Exports each translated clone as PNG and downloads one ZIP file.
-- Uses script-aware fallback fonts when possible, while preserving existing text styles.
+- Figma Desktop app
+- OpenAI API key
+- Internet access from Figma to `https://api.openai.com`
+- Required fonts installed locally (especially for non-Latin languages)
 
-## Files
+## Get the Code
 
-- `manifest.json`
-- `code.js`
-- `ui.html`
+Clone this repository locally.
 
-## Install in Figma (development)
+```bash
+git clone <your-repo-url>
+```
+
+## Install in Figma Desktop (Development)
 
 1. Open Figma Desktop.
-2. Go to **Plugins** -> **Development** -> **Import plugin from manifest...**
-3. Select this folder's `manifest.json`.
+2. Open any design file (Drafts is fine).
+3. Go to **Plugins** -> **Development** -> **Import plugin from manifest...**
+4. Select this project's `manifest.json`.
+5. Confirm the plugin appears under **Plugins** -> **Development** as **Translate Frame Exporter**.
 
-## Usage
+## How to Use the Plugin in Figma Desktop
 
-1. Select one or more frame layers in your file.
-2. Run the plugin from **Plugins** -> **Development** -> **Multilingual Frame Exporter**.
+1. In your Figma file, select one or more layers of type `FRAME`.
+2. Launch the plugin from **Plugins** -> **Development** -> **Translate Frame Exporter**.
 3. Enter your OpenAI API key.
-4. Optionally change export scale.
-5. Select target languages (use Select all / Deselect all for faster selection).
+4. Set PNG export scale (default `1`, range `1` to `4`).
+5. Choose one or more target languages.
 6. Click **Translate & Export**.
+7. Wait for processing to complete. The plugin will generate and download one ZIP file containing translated PNGs.
+
+## What the Plugin Does During Export
+
+- Clones each selected frame (original frames are not modified).
+- Translates all text nodes in each clone per selected language.
+- Applies script-aware fallback fonts when available.
+- Exports each translated clone as PNG.
+- Bundles outputs into a single ZIP file.
 
 ## Notes
 
-- Figma must be able to access `https://api.openai.com`.
-- If a text layer uses missing fonts, install fonts first.
-- For non-Latin scripts, install compatible fonts (for example Noto family) if you see fallback warnings.
-- The plugin saves your last OpenAI API key and language selections locally in the plugin UI.
-- API usage cost depends on your OpenAI account and model.
+- If no frames are selected, export will fail with an error.
+- If a text node has missing fonts, install those fonts and rerun export.
+- For scripts like Japanese, Korean, Thai, or Arabic, install compatible fonts (for example Noto families) to avoid fallback warnings.
+- The plugin stores your API key and selected languages locally using Figma client storage for convenience.
+- API usage cost depends on your OpenAI account and selected model.

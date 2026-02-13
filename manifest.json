@@ -1,11 +1,12 @@
 {
-  "name": "Multilingual Frame Exporter",
-  "id": "frame-translator-exporter",
+  "id": "1604243117991625109",
+  "name": "Translate Frame Exporter",
   "api": "1.0.0",
   "editorType": ["figma"],
   "main": "code.js",
   "ui": "ui.html",
   "networkAccess": {
     "allowedDomains": ["https://api.openai.com"]
-  }
+  },
+  "documentAccess": "dynamic-page"
 }
