@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Multilingual Frame Exporter</title>
+  </head>
+  <body
+    style="
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      box-sizing: border-box;
+      height: 100vh;
+      overflow-y: auto;
+      color: #1f2328;
+      background: #ffffff;
+    "
+  >
+    <h1 style="font-size: 16px; margin: 0 0 12px">Multilingual Frame Exporter</h1>
+    <div style="font-size: 12px; color: #57606a; margin-bottom: 12px">
+      Select one or more <b>Frame</b> layers in Figma, then export PNGs in selected
+      languages.
+    </div>
+
+    <div style="margin-bottom: 12px">
+      <label
+        for="apiKey"
+        style="display: block; font-size: 12px; margin-bottom: 6px; color: #24292f"
+        >OpenAI API Key</label
+      >
+      <input
+        id="apiKey"
+        type="password"
+        placeholder="sk-..."
+        style="
+          width: 100%;
+          border: 1px solid #d0d7de;
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 12px;
+          box-sizing: border-box;
+        "
+      />
+    </div>
+
+    <div style="margin-bottom: 12px">
+      <label
+        for="scale"
+        style="display: block; font-size: 12px; margin-bottom: 6px; color: #24292f"
+        >Export Scale (PNG)</label
+      >
+      <input
+        id="scale"
+        type="number"
+        min="1"
+        max="4"
+        step="0.5"
+        value="1"
+        style="
+          width: 100%;
+          border: 1px solid #d0d7de;
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 12px;
+          box-sizing: border-box;
+        "
+      />
+    </div>
+
+    <div style="margin-bottom: 12px">
+      <label style="display: block; font-size: 12px; margin-bottom: 6px; color: #24292f"
+        >Languages</label
+      >
+      <div
+        style="
+          display: flex;
+          gap: 8px;
+          margin: 0 0 8px;
+          justify-content: flex-end;
+        "
+      >
+        <button
+          id="selectAllBtn"
+          type="button"
+          style="
+            border: none;
+            background: transparent;
+            color: #0969da;
+            padding: 0;
+            margin: 0;
+            font-size: 12px;
+            cursor: pointer;
+          "
+        >
+          Select all
+        </button>
+        <button
+          id="deselectAllBtn"
+          type="button"
+          style="
+            border: none;
+            background: transparent;
+            color: #0969da;
+            padding: 0;
+            margin: 0;
+            font-size: 12px;
+            cursor: pointer;
+          "
+        >
+          Deselect all
+        </button>
+      </div>
+      <div
+        id="languages"
+        style="border: 1px solid #d0d7de; border-radius: 6px; padding: 8px"
+      ></div>
+    </div>
+
+    <div
+      style="
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+        position: sticky;
+        bottom: 0;
+        background: #ffffff;
+        padding-top: 10px;
+        padding-bottom: 4px;
+        z-index: 2;
+      "
+    >
+      <button
+        id="exportBtn"
+        style="
+          border: none;
+          border-radius: 6px;
+          padding: 12px;
+          font-size: 12px;
+          cursor: pointer;
+          background: #0969da;
+          color: #ffffff;
+          flex: 1;
+        "
+      >
+        Translate & Export
+      </button>
+      <button
+        id="closeBtn"
+        style="
+          border: none;
+          border-radius: 6px;
+          padding: 12px;
+          font-size: 12px;
+          cursor: pointer;
+          background: #f6f8fa;
+          color: #24292f;
+        "
+      >
+        Close
+      </button>
+    </div>
+
+    <div
+      id="status"
+      style="margin-top: 12px; font-size: 12px; min-height: 16px; color: #57606a"
+    ></div>
+
+    <script>
+      const LANGUAGE_OPTIONS = [
+        "English",
+        "Japanese",
+        "Korean",
+        "German",
+        "French",
+        "Spanish (Latin America)",
+        "Portuguese (Brazil)",
+        "Italian",
+        "Spanish (Spain)",
+        "Turkish",
+        "Thai",
+        "Indonesian",
+        "Vietnamese",
+        "Polish",
+        "Arabic",
+        "Russian",
+      ];
+
+      const languagesEl = document.getElementById("languages");
+      const apiKeyEl = document.getElementById("apiKey");
+      const scaleEl = document.getElementById("scale");
+      const statusEl = document.getElementById("status");
+      const exportBtn = document.getElementById("exportBtn");
+      const closeBtn = document.getElementById("closeBtn");
+      const selectAllBtn = document.getElementById("selectAllBtn");
+      const deselectAllBtn = document.getElementById("deselectAllBtn");
+
+      let warningsExpanded = false;
+
+      function getAllLanguageCheckboxes() {
+        return Array.from(languagesEl.querySelectorAll('input[type="checkbox"]'));
+      }
+
+      LANGUAGE_OPTIONS.forEach((name, index) => {
+        const row = document.createElement("label");
+        row.style.cssText =
+          "display:flex;align-items:center;gap:8px;margin:4px 0;font-size:12px;color:#24292f;";
+        row.innerHTML = `<input type="checkbox" value="${name}" /> <span>${name}</span>`;
+        const checkbox = row.querySelector("input");
+        if (index < 3) {
+          checkbox.checked = true;
+        }
+        languagesEl.appendChild(row);
+      });
+
+      function getSelectedLanguages() {
+        return getAllLanguageCheckboxes()
+          .filter((el) => el.checked)
+          .map((el) => el.value);
+      }
+
+      function applySelectedLanguages(languages) {
+        const hasProvidedSelection = Array.isArray(languages);
+        const selected = new Set((languages || []).map((item) => String(item)));
+        getAllLanguageCheckboxes().forEach((el, index) => {
+          if (hasProvidedSelection) {
+            el.checked = selected.has(el.value);
+          } else {
+            el.checked = index < 3;
+          }
+        });
+      }
+
+      function saveSettings() {
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "save-settings",
+              payload: {
+                apiKey: apiKeyEl.value || "",
+                languages: getSelectedLanguages(),
+              },
+            },
+          },
+          "*"
+        );
+      }
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message || "";
+        statusEl.style.color = isError ? "#cf222e" : "#57606a";
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function setStructuredWarningsStatus(summary, warnings) {
+        const safeSummary = escapeHtml(summary || "Done.");
+        const safeWarnings = (warnings || []).map(
+          (item) => `<li>${escapeHtml(item)}</li>`
+        );
+        const count = safeWarnings.length;
+        const detailsDisplay = warningsExpanded ? "block" : "none";
+        const toggleLabel = warningsExpanded ? "Hide warnings" : "Show warnings";
+
+        statusEl.style.color = "#cf222e";
+        statusEl.innerHTML = `
+          <div style="line-height:1.4">
+            <div style="font-weight:600; margin-bottom:6px">${safeSummary}</div>
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px">
+              <div>Warnings (${count})</div>
+              <button
+                id="warningsToggleBtn"
+                type="button"
+                style="border:none;background:transparent;color:#cf222e;padding:0;margin:0 0 0 auto;font-size:12px;text-decoration:underline;cursor:pointer;"
+              >${toggleLabel}</button>
+            </div>
+            <div id="warningsDetails" style="display:${detailsDisplay}">
+              <ul style="margin:0; padding-left:18px">${safeWarnings.join("")}</ul>
+            </div>
+          </div>
+        `;
+
+        const toggleBtn = document.getElementById("warningsToggleBtn");
+        const details = document.getElementById("warningsDetails");
+        if (toggleBtn && details) {
+          toggleBtn.onclick = () => {
+            warningsExpanded = !warningsExpanded;
+            details.style.display = warningsExpanded ? "block" : "none";
+            toggleBtn.textContent = warningsExpanded
+              ? "Hide warnings"
+              : "Show warnings";
+          };
+        }
+      }
+
+      function makeCrc32Table() {
+        const table = new Uint32Array(256);
+        for (let n = 0; n < 256; n += 1) {
+          let c = n;
+          for (let k = 0; k < 8; k += 1) {
+            c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+          }
+          table[n] = c >>> 0;
+        }
+        return table;
+      }
+
+      const CRC32_TABLE = makeCrc32Table();
+
+      function crc32(bytes) {
+        let c = 0 ^ -1;
+        for (let i = 0; i < bytes.length; i += 1) {
+          c = (c >>> 8) ^ CRC32_TABLE[(c ^ bytes[i]) & 0xff];
+        }
+        return (c ^ -1) >>> 0;
+      }
+
+      function getDosDateTime(date) {
+        const year = Math.max(1980, date.getFullYear());
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        const hours = date.getHours();
+        const minutes = date.getMinutes();
+        const seconds = Math.floor(date.getSeconds() / 2);
+        return {
+          dosTime: (hours << 11) | (minutes << 5) | seconds,
+          dosDate: ((year - 1980) << 9) | (month << 5) | day,
+        };
+      }
+
+      function createLocalHeader(crc, size, dosTime, dosDate, nameLength) {
+        const buffer = new ArrayBuffer(30);
+        const view = new DataView(buffer);
+        view.setUint32(0, 0x04034b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 0x0800, true);
+        view.setUint16(8, 0, true);
+        view.setUint16(10, dosTime, true);
+        view.setUint16(12, dosDate, true);
+        view.setUint32(14, crc, true);
+        view.setUint32(18, size, true);
+        view.setUint32(22, size, true);
+        view.setUint16(26, nameLength, true);
+        view.setUint16(28, 0, true);
+        return new Uint8Array(buffer);
+      }
+
+      function createCentralHeader(crc, size, dosTime, dosDate, nameLength, localOffset) {
+        const buffer = new ArrayBuffer(46);
+        const view = new DataView(buffer);
+        view.setUint32(0, 0x02014b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 20, true);
+        view.setUint16(8, 0x0800, true);
+        view.setUint16(10, 0, true);
+        view.setUint16(12, dosTime, true);
+        view.setUint16(14, dosDate, true);
+        view.setUint32(16, crc, true);
+        view.setUint32(20, size, true);
+        view.setUint32(24, size, true);
+        view.setUint16(28, nameLength, true);
+        view.setUint16(30, 0, true);
+        view.setUint16(32, 0, true);
+        view.setUint16(34, 0, true);
+        view.setUint16(36, 0, true);
+        view.setUint32(38, 0, true);
+        view.setUint32(42, localOffset, true);
+        return new Uint8Array(buffer);
+      }
+
+      function createEndOfCentralDirectory(totalEntries, centralSize, centralOffset) {
+        const buffer = new ArrayBuffer(22);
+        const view = new DataView(buffer);
+        view.setUint32(0, 0x06054b50, true);
+        view.setUint16(4, 0, true);
+        view.setUint16(6, 0, true);
+        view.setUint16(8, totalEntries, true);
+        view.setUint16(10, totalEntries, true);
+        view.setUint32(12, centralSize, true);
+        view.setUint32(16, centralOffset, true);
+        view.setUint16(20, 0, true);
+        return new Uint8Array(buffer);
+      }
+
+      function concatUint8Arrays(chunks) {
+        let total = 0;
+        for (let i = 0; i < chunks.length; i += 1) {
+          total += chunks[i].length;
+        }
+        const out = new Uint8Array(total);
+        let offset = 0;
+        for (let i = 0; i < chunks.length; i += 1) {
+          out.set(chunks[i], offset);
+          offset += chunks[i].length;
+        }
+        return out;
+      }
+
+      function buildZipBytes(files) {
+        const encoder = new TextEncoder();
+        const localParts = [];
+        const centralParts = [];
+        let currentOffset = 0;
+        for (let i = 0; i < files.length; i += 1) {
+          const file = files[i];
+          const nameBytes = encoder.encode(file.fileName);
+          const dataBytes = new Uint8Array(file.bytes);
+          const crc = crc32(dataBytes);
+          const dt = getDosDateTime(new Date());
+          const localHeader = createLocalHeader(
+            crc,
+            dataBytes.length,
+            dt.dosTime,
+            dt.dosDate,
+            nameBytes.length
+          );
+          localParts.push(localHeader, nameBytes, dataBytes);
+          const centralHeader = createCentralHeader(
+            crc,
+            dataBytes.length,
+            dt.dosTime,
+            dt.dosDate,
+            nameBytes.length,
+            currentOffset
+          );
+          centralParts.push(centralHeader, nameBytes);
+          currentOffset += localHeader.length + nameBytes.length + dataBytes.length;
+        }
+        const centralOffset = currentOffset;
+        const centralBytes = concatUint8Arrays(centralParts);
+        const endRecord = createEndOfCentralDirectory(
+          files.length,
+          centralBytes.length,
+          centralOffset
+        );
+        return concatUint8Arrays(localParts.concat([centralBytes, endRecord]));
+      }
+
+      function downloadZip(fileName, bytesArray) {
+        const blob = new Blob([bytesArray], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
+
+      applySelectedLanguages(undefined);
+      apiKeyEl.addEventListener("input", saveSettings);
+      languagesEl.addEventListener("change", (event) => {
+        const target = event.target;
+        if (target && target.type === "checkbox") {
+          saveSettings();
+        }
+      });
+
+      exportBtn.onclick = () => {
+        saveSettings();
+        setStatus("Starting export...");
+        parent.postMessage(
+          {
+            pluginMessage: {
+              type: "export",
+              payload: {
+                apiKey: apiKeyEl.value.trim(),
+                scale: Number(scaleEl.value) || 1,
+                languages: getSelectedLanguages(),
+              },
+            },
+          },
+          "*"
+        );
+      };
+
+      closeBtn.onclick = () => {
+        parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+      };
+
+      selectAllBtn.onclick = () => {
+        getAllLanguageCheckboxes().forEach((el) => {
+          el.checked = true;
+        });
+        saveSettings();
+      };
+
+      deselectAllBtn.onclick = () => {
+        getAllLanguageCheckboxes().forEach((el) => {
+          el.checked = false;
+        });
+        saveSettings();
+      };
+
+      window.onmessage = (event) => {
+        const msg = event.data.pluginMessage;
+        if (!msg) return;
+
+        if (msg.type === "init-settings") {
+          const settings = msg.settings || {};
+          if (typeof settings.apiKey === "string") {
+            apiKeyEl.value = settings.apiKey;
+          }
+          applySelectedLanguages(settings.languages);
+          return;
+        }
+
+        if (msg.type === "progress") {
+          setStatus(`${msg.message} (${msg.completed}/${msg.total})`);
+          return;
+        }
+
+        if (msg.type === "zip") {
+          setStatus("Building ZIP file...");
+          const zipBytes = buildZipBytes(msg.files || []);
+          downloadZip(msg.zipName || "translated_frames.zip", zipBytes);
+          const warnings = msg.warnings || [];
+          if (warnings.length > 0) {
+            setStructuredWarningsStatus(msg.message || "Done.", warnings);
+          } else {
+            setStatus(msg.message || "Done.");
+          }
+          return;
+        }
+
+        if (msg.type === "done") {
+          setStatus(msg.message || "Done.");
+          return;
+        }
+
+        if (msg.type === "error") {
+          setStatus(msg.message || "Something went wrong.", true);
+        }
+      };
+
+      parent.postMessage({ pluginMessage: { type: "request-settings" } }, "*");
+    </script>
+  </body>
+</html>
